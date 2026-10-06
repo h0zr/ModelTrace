@@ -175,6 +175,8 @@ export async function requestCompletion(config, prompt, { signal, fetchImpl = fe
     body.messages = [{ role: "user", content: prompt }];
   } else {
     body.prompt = prompt;
+    // Legacy Completions defaults to only 16 tokens, too short for a probe.
+    body.max_tokens = 2048;
   }
 
   try {

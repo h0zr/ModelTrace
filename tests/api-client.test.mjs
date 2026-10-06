@@ -59,7 +59,7 @@ test("all protocol requests use the selected endpoint, safe fetch options and no
   const protocols = [
     ["responses", { input: "test prompt", store: false }, { output: [{ type: "message", content: [{ type: "output_text", text: "1, 2, 3" }] }] }],
     ["chat", { messages: [{ role: "user", content: "test prompt" }] }, chatResponse],
-    ["completions", { prompt: "test prompt" }, { choices: [{ text: "1, 2, 3" }] }],
+    ["completions", { prompt: "test prompt", max_tokens: 2048 }, { choices: [{ text: "1, 2, 3" }] }],
   ];
   for (const [format, expectedBody, payload] of protocols) {
     let calls = 0;
