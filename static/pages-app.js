@@ -1,7 +1,9 @@
 import { analyzeGlobalOutputs } from "./fingerprint-core.js";
 import { generateChallenges } from "./challenge-browser.js";
+import { normalizeConfig } from "./api-client.js";
+import { runApiTest } from "./api-runner.js";
 
-const state = { bank: null, challenges: [] };
+const state = { bank: null, challenges: [], controller: null, mode: "api", results: { manual: null, api: null } };
 const byId = (id) => document.getElementById(id);
 
 function escapeHtml(value) {
@@ -57,12 +59,14 @@ function renderChallenges() {
 }
 
 function regenerate() {
+  state.results.manual = null;
   state.challenges = generateChallenges(3);
   setMessage("");
   renderChallenges();
 }
 
-function renderResult(payload) {
+function renderResult(payload, note = "", scroll = true) {
+  state.results[state.mode] = { payload, note };
   const diagnostics = payload.diagnostics.map((item, index) => `
     <span class="diagnostic ${item.accepted ? "accepted" : "rejected"}">挑战 ${index + 1}: ${item.parsed_numbers} 个数字 · ${item.accepted ? "计入" : "忽略"}</span>
   `).join("");
@@ -85,18 +89,20 @@ function renderResult(payload) {
     </div>
     <div class="diagnostics">${diagnostics}</div>
     <div class="table-wrap"><table><thead><tr><th>排序</th><th>候选模型</th><th>家族</th><th>归因概率</th><th>分布相似度</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${note ? `<div class="result-note">${escapeHtml(note)}</div>` : ""}
     <div class="result-guidance" role="note" aria-label="结果说明">
       <p>本工具仅对指纹库内的模型进行归因；若待测模型不在指纹库中，得到任何结果都有可能。</p>
       <p>Claude Code 的系统提示词会影响模型偏好，测试结果存在较大偏差，建议不要在 Claude Code 中测试。</p>
     </div>
   `;
   result.hidden = false;
-  result.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (scroll) result.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 async function analyze() {
   const button = byId("analyze");
   button.disabled = true;
+  state.results.manual = null;
   byId("result").hidden = true;
   setMessage("正在浏览器本地计算……", "working");
   await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -114,6 +120,98 @@ async function analyze() {
   }
 }
 
+function activateMode(mode) {
+  if (state.controller) return;
+  state.mode = mode;
+  document.querySelectorAll("[data-test-mode]").forEach((tab) => {
+    const active = tab.dataset.testMode === mode;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", String(active));
+    tab.tabIndex = active ? 0 : -1;
+    const panel = byId(`test-${tab.dataset.testMode}`);
+    panel.classList.toggle("active", active);
+    panel.hidden = !active;
+  });
+  byId("result").hidden = true;
+  const saved = state.results[mode];
+  if (saved) renderResult(saved.payload, saved.note, false);
+  if (state.bank) setMessage("");
+}
+
+function setApiBusy(busy) {
+  byId("api-test-form").querySelectorAll("input, select, button").forEach((item) => { item.disabled = busy; });
+  document.querySelectorAll("[data-test-mode]").forEach((item) => { item.disabled = busy; });
+  byId("api-start").hidden = busy;
+  byId("api-stop").hidden = !busy;
+  byId("api-stop").disabled = false;
+}
+
+function renderApiProgress({ steps, valid, attempted }, status) {
+  const labels = { pending: "等待", working: "请求中", done: "有效", invalid: "数字不足", error: "接口失败", cancelled: "已停止", skipped: "无需调用" };
+  byId("api-test-progress").hidden = false;
+  const current = steps.findIndex((step) => step.status === "working");
+  byId("api-progress-status").textContent = status || (current >= 0
+    ? `正在进行挑战 ${current + 1}，等待模型完整输出……`
+    : `已获得 ${valid}/3 份有效回答`);
+  byId("api-progress-count").textContent = `有效 ${valid}/3 · 已尝试 ${attempted}/${steps.length}`;
+  byId("api-progress-fill").style.width = `${valid / 3 * 100}%`;
+  byId("api-progress-bar").setAttribute("aria-valuenow", String(valid));
+  byId("api-progress-steps").innerHTML = steps.map((step, index) => `
+    <span class="progress-step ${step.status}" title="${escapeHtml(step.message || "")}"><b>${index + 1}</b>挑战 ${index + 1} · ${labels[step.status]}${step.status === "invalid" ? `（${step.count} 个）` : ""}</span>
+  `).join("");
+}
+
+async function testViaApi(event) {
+  event.preventDefault();
+  if (state.controller || !state.bank) return;
+  let config;
+  try {
+    config = normalizeConfig({
+      baseUrl: byId("test-api-base").value,
+      apiKey: byId("test-api-key").value,
+      model: byId("test-api-model").value,
+      format: byId("test-api-format").value,
+      temperature: byId("test-temperature").value,
+      timeoutMs: Number(byId("test-timeout").value) * 1000,
+    });
+  } catch (error) {
+    setMessage(error.message);
+    return;
+  }
+  const controller = new AbortController();
+  state.controller = controller;
+  state.results.api = null;
+  setApiBusy(true);
+  byId("result").hidden = true;
+  setMessage("");
+  let progress;
+  try {
+    const result = await runApiTest(config, {
+      bank: state.bank,
+      signal: controller.signal,
+      onProgress: (next) => { progress = next; renderApiProgress(next); },
+    });
+    const valid = result.payload?.used_outputs || 0;
+    const status = result.cancelled ? `测试已停止：保留 ${valid}/3 份有效回答`
+      : valid === 3 ? "测试完成：3/3 份有效回答进入归因"
+      : `测试结束：获得 ${valid}/3 份有效回答`;
+    renderApiProgress(progress, status);
+    if (result.payload) {
+      const protocol = byId("test-api-format").selectedOptions[0].textContent;
+      renderResult(result.payload, `${protocol} · ${valid}/3 份有效回答 · 已尝试 ${progress.attempted}/${progress.steps.length}${valid < 3 ? " · 样本不足，结果仅供参考" : ""}`);
+    }
+    if (result.errors.length) setMessage(result.errors.join(" "));
+    else if (!valid) setMessage(result.cancelled ? "测试已停止，尚无可用于归因的回答。" : "没有获得足够的数字，请检查模型输出后重试。", "working");
+    else if (valid < 3) setMessage("有效回答少于 3 份，已使用现有样本计算；可重新测试以收集完整样本。", "working");
+  } catch {
+    setMessage("未能完成归因，请检查指纹库是否加载正常后重试。");
+  } finally {
+    config = null;
+    state.controller = null;
+    setApiBusy(false);
+  }
+}
+
 async function initialize() {
   try {
     const response = await fetch("./data/unified_bank.json", { cache: "no-cache" });
@@ -124,6 +222,7 @@ async function initialize() {
     byId("active-bank-badge").textContent = `${state.bank.models.length} 个模型 · ${responseCount} 条指纹`;
     byId("regenerate").disabled = false;
     byId("analyze").disabled = false;
+    byId("api-start").disabled = false;
     regenerate();
   } catch (error) {
     setMessage(`${error.message}。请通过 HTTP 服务或 GitHub Pages 打开本页面。`, "error");
@@ -132,4 +231,25 @@ async function initialize() {
 
 byId("regenerate").addEventListener("click", regenerate);
 byId("analyze").addEventListener("click", analyze);
+byId("api-test-form").addEventListener("submit", testViaApi);
+byId("api-stop").addEventListener("click", () => {
+  state.controller?.abort();
+  byId("api-stop").disabled = true;
+});
+byId("api-clear-key").addEventListener("click", () => {
+  byId("test-api-key").value = "";
+  byId("test-api-key").focus();
+});
+const modeTabs = [...document.querySelectorAll("[data-test-mode]")];
+modeTabs.forEach((tab, index) => {
+  tab.addEventListener("click", () => activateMode(tab.dataset.testMode));
+  tab.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key) || state.controller) return;
+    event.preventDefault();
+    const next = event.key === "Home" ? 0 : event.key === "End" ? modeTabs.length - 1 : (index + 1) % modeTabs.length;
+    activateMode(modeTabs[next].dataset.testMode);
+    modeTabs[next].focus();
+  });
+});
+window.addEventListener("pagehide", () => { state.controller?.abort(); byId("test-api-key").value = ""; });
 initialize();

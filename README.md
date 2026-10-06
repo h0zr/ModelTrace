@@ -13,12 +13,23 @@ python start.py
 
 ## GitHub Pages
 
-`static/index.html` 是不依赖后端的手动测试版本，归因计算和指纹库读取都在浏览器本地完成。仓库附带的 GitHub Actions 会将 `static/` 部署到 GitHub Pages。
+本 fork 的在线地址：**https://h0zr.github.io/ModelTrace/**。源项目为 [xqy2006/ModelTrace](https://github.com/xqy2006/ModelTrace)，保留原有指纹算法和手动测试。
+
+`static/index.html` 无需后端，同时支持手动测试和浏览器 API 自动测试。归因计算和指纹库读取都在浏览器本地完成。
+
+1. 打开「API 自动测试」，填写 Base URL、API Key、服务商提供的模型 ID。
+2. 选择 `Responses`（`/responses`）、`Chat Completions`（`/chat/completions`）或旧式 `Completions`（`/completions`）。根地址自动补 `/v1`；自定义基础路径和完整接口地址也可使用。
+3. 温度可留空，默认不传该字段；单次超时默认 180 秒，可以调整。
+4. 开始测试后按顺序调用模型，收集 3 份有效回答。数字不足会换新挑战，最多 6 次；接口报错立即停止，不自动切换协议或重试。停止测试后仍可用已收到的有效回答计算归因。
+
+请求直接从浏览器发送到你填写的地址，API Key 不会写入 localStorage、sessionStorage、仓库或 GitHub Actions，也没有第三方代理。服务商必须允许 Pages 站点的 CORS 预检及 `Authorization`、`Content-Type` 请求头；如不支持跨域，需要服务商开启后才能在网页调用。HTTP API 仅支持本机回环地址；线上请使用 HTTPS。测试会消耗服务商 API 额度。离开、刷新页面或使用「清除密钥」会清空当前密钥。
+
+Actions 在推送 `main` 后运行浏览器模块测试并部署静态资源。在仓库 Settings → Pages 中选择 GitHub Actions 作为 Source。可本地运行 `node --test tests/*.test.mjs` 验证三种协议、响应提取、取消、超时和挑战采集流程。
 
 ## 使用
 
 - **手动测试**：复制三条挑战，分别发送给同一个待测模型，再粘贴每次完整输出。
-- **API 自动测试**：填写 Base URL、API Key 和模型名。程序会自动尝试 OpenAI Chat Completions 与 Anthropic Messages 格式，以三份有效回答为目标完成归因。
+- **API 自动测试（本地 Python 版）**：填写 Base URL、API Key 和模型名。程序会自动尝试 OpenAI Chat Completions 与 Anthropic Messages 格式，以三份有效回答为目标完成归因。GitHub Pages 版本的三种协议见上方说明。
 - **指纹库管理**：可以新建指纹库，或通过 API 为现有指纹库添加模型指纹。
 
 API Key 只用于当前页面发起请求，不写入磁盘。

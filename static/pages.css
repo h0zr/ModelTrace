@@ -1,0 +1,16 @@
+[hidden] { display: none !important; }
+.api-notice { padding: 0 17px 16px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.api-notice p { margin: 0; }
+.api-notice p + p { margin-top: 3px; }
+.form-footer { gap: 10px; }
+.form-footer #api-clear-key { margin-right: auto; }
+.mode-tab:focus-visible, .button:focus-visible { outline: 3px solid #84adff; outline-offset: 2px; }
+.progress-step { overflow-wrap: anywhere; }
+.progress-step.cancelled { color: var(--muted); background: var(--surface-soft); }
+.site-footer { max-width: 1240px; margin: 22px auto 0; color: var(--muted); font-size: 11px; }
+.site-footer a { color: var(--primary); text-decoration: none; }
+@media (max-width: 640px) {
+  .progress-heading { align-items: flex-start; flex-direction: column; gap: 6px; }
+  .form-footer #api-clear-key { margin-right: 0; }
+  .result-summary strong { font-size: 16px; overflow-wrap: anywhere; }
+}

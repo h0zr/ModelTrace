@@ -25,10 +25,15 @@ jobs:
         uses: actions/checkout@v4
       - name: Configure Pages
         uses: actions/configure-pages@v5
-      - name: Assemble manual-only site
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test browser API support
+        run: node --test tests/*.test.mjs
+      - name: Assemble browser test site
         run: |
           mkdir -p _site/data
-          cp static/index.html static/styles.css static/repository-link.css static/pages-app.js static/fingerprint-core.js static/challenge-browser.js static/.nojekyll _site/
+          cp static/index.html static/styles.css static/repository-link.css static/pages.css static/pages-app.js static/api-client.js static/api-runner.js static/fingerprint-core.js static/challenge-browser.js static/.nojekyll _site/
           cp data/unified_bank.json _site/data/unified_bank.json
       - name: Upload static site
         uses: actions/upload-pages-artifact@v3
