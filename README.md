@@ -13,7 +13,7 @@ python start.py
 
 ## GitHub Pages
 
-本 fork 的在线地址：**https://h0zr.github.io/ModelTrace/**。源项目为 [xqy2006/ModelTrace](https://github.com/xqy2006/ModelTrace)，保留原有指纹算法和手动测试。
+本 fork 的在线地址：**https://h0zr.github.io/ModelTrace/**。网页增强功能位于 [`web-api-testing`](https://github.com/h0zr/ModelTrace/tree/web-api-testing) 分支，`main` 保持与上游一致。源项目为 [xqy2006/ModelTrace](https://github.com/xqy2006/ModelTrace)，保留原有指纹算法和手动测试。
 
 `static/index.html` 无需后端，同时支持手动测试和浏览器 API 自动测试。归因计算和指纹库读取都在浏览器本地完成。
 
@@ -24,7 +24,7 @@ python start.py
 
 请求直接从浏览器发送到你填写的地址，API Key 不会写入 localStorage、sessionStorage、仓库或 GitHub Actions，也没有第三方代理。服务商必须允许 Pages 站点的 CORS 预检及 `Authorization`、`Content-Type` 请求头；如不支持跨域，需要服务商开启后才能在网页调用。HTTP API 仅支持本机回环地址；线上请使用 HTTPS。测试会消耗服务商 API 额度。离开、刷新页面或使用「清除密钥」会清空当前密钥。
 
-Actions 在推送 `main` 后运行浏览器模块测试并部署静态资源。在仓库 Settings → Pages 中选择 GitHub Actions 作为 Source。可本地运行 `node --test tests/*.test.mjs` 验证三种协议、响应提取、取消、超时和挑战采集流程。
+Actions 在推送 `web-api-testing` 后运行浏览器模块测试并部署静态资源。在仓库 Settings → Pages 中选择 GitHub Actions 作为 Source，部署环境只允许 `web-api-testing` 分支，避免同步 `main` 时覆盖线上增强版。也可在该分支手动触发 Pages 工作流。可本地运行 `node --test tests/*.test.mjs` 验证三种协议、响应提取、取消、超时和挑战采集流程。
 
 ## 使用
 
