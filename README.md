@@ -4,6 +4,10 @@ ModelTrace 是一个本地运行的主动模型归因工具。它通过三条独
 
 ## 运行
 
+Windows 一键部署：双击 `deploy.bat`。脚本直接使用 uv 创建或复用 `.venv`、安装依赖并启动页面，不执行环境、版本或端口检查。
+
+手动运行：
+
 ```powershell
 python -m pip install -r requirements.txt
 python start.py
