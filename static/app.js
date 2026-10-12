@@ -156,6 +156,7 @@ async function testViaApi(event) {
   const errors = [];
   const target = 3;
   const configuration = {
+    api_format: byId("test-api-format").value,
     base_url: byId("test-api-base").value,
     api_key: byId("test-api-key").value,
     api_model: byId("test-api-model").value,
@@ -256,14 +257,15 @@ async function enrollAutomatically(event) {
   const started = Date.now();
   const progressTimer = window.setInterval(() => {
     const seconds = Math.floor((Date.now() - started) / 1000);
-    setMessage(byId("enrollment-message"), `正在自动识别协议并采集 ${requested} 份回答 · 已等待 ${seconds} 秒`, "working");
+    setMessage(byId("enrollment-message"), `正在采集 ${requested} 份回答 · 已等待 ${seconds} 秒`, "working");
   }, 1000);
-  setMessage(byId("enrollment-message"), `正在自动识别协议并采集 ${requested} 份回答`, "working");
+  setMessage(byId("enrollment-message"), `正在采集 ${requested} 份回答`, "working");
   let response;
   try {
     response = await fetch("/api/enroll/auto", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        api_format: byId("api-format").value,
         base_url: byId("api-base").value,
         api_key: byId("api-key").value,
         api_model: byId("api-model").value,

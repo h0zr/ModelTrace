@@ -44,7 +44,8 @@
         <section id="test-api" class="mode-panel">
           <form id="api-test-form" class="form-panel">
             <div class="form-grid two">
-              <label><span>Base URL</span><input id="test-api-base" required placeholder="https://example.com/v1"></label>
+              <label style="grid-column: 1 / -1"><span>Base URL</span><input id="test-api-base" required placeholder="https://example.com"><small>填写服务根地址或 /v1，自动补齐接口路径。</small></label>
+              <label><span>接口协议</span><select id="test-api-format" required>{% for value, label in api_formats.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></label>
               <label><span>接口模型名</span><input id="test-api-model" required placeholder="模型名"></label>
               <label><span>API Key</span><input id="test-api-key" type="password" required autocomplete="off"></label>
               <label><span>温度（可选）</span><input id="test-temperature" type="number" min="0" max="2" step="0.1" placeholder="接口默认"></label>
@@ -84,7 +85,8 @@
         <form id="auto-enrollment" class="form-panel">
           <div class="form-heading"><strong>新建指纹</strong></div>
           <div class="form-grid two">
-            <label><span>Base URL</span><input id="api-base" required placeholder="https://example.com/v1"></label>
+            <label style="grid-column: 1 / -1"><span>Base URL</span><input id="api-base" required placeholder="https://example.com"><small>填写服务根地址或 /v1，自动补齐接口路径。</small></label>
+            <label><span>接口协议</span><select id="api-format" required>{% for value, label in api_formats.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></label>
             <label><span>接口模型名</span><input id="api-model" required placeholder="实际请求使用的模型名"></label>
             <label><span>API Key</span><input id="api-key" type="password" required autocomplete="off"></label>
             <label><span>指纹名称</span><input id="auto-model" list="model-options" required placeholder="例如 model-version-name"></label>

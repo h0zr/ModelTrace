@@ -18,6 +18,11 @@ PROJECT = Path(__file__).resolve().parent
 CUSTOM_BANKS_FILE = PROJECT / "data" / "custom_banks.json"
 UNIFIED_BANK_FILE = PROJECT / "data" / "unified_bank.json"
 DEFAULT_BANK_ID = "claude"
+API_FORMATS = {
+    "openai": "OpenAI Chat Completions",
+    "responses": "OpenAI Responses",
+    "anthropic": "Anthropic Messages",
+}
 
 
 def builtin_configs() -> dict[str, dict]:
@@ -121,6 +126,13 @@ def requested_temperature(payload: dict) -> float | None:
     return None if value in (None, "") else float(value)
 
 
+def requested_api_format(payload: dict) -> str:
+    api_format = payload.get("api_format", "openai")
+    if not isinstance(api_format, str) or api_format not in API_FORMATS:
+        raise ValueError("请选择支持的接口协议：OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages")
+    return api_format
+
+
 def summarized_bank(bank_id: str) -> dict:
     config = BANK_CONFIGS[bank_id]
     bank = banks.get(bank_id)
@@ -164,6 +176,7 @@ def index():
         bank=summaries[DEFAULT_BANK_ID],
         unified=summarized_unified_bank(),
         default_bank_id=DEFAULT_BANK_ID,
+        api_formats=API_FORMATS,
     )
 
 
@@ -193,7 +206,7 @@ def automatic_test():
             api_model=payload["api_model"].strip(),
             temperature=requested_temperature(payload),
             bank=unified_bank,
-            api_format="auto",
+            api_format=requested_api_format(payload),
         )
         result["bank"] = summarized_unified_bank()
         return jsonify(result)
@@ -211,7 +224,7 @@ def automatic_test_probe():
             api_model=payload["api_model"].strip(),
             prompt=payload["prompt"],
             temperature=requested_temperature(payload),
-            api_format="auto",
+            api_format=requested_api_format(payload),
         )
         expected_count = int(payload["expected_count"])
         parsed_numbers = len(parse_numbers(text))
@@ -224,6 +237,8 @@ def automatic_test_probe():
                 "accepted": parsed_numbers >= minimum_numbers,
             }
         )
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
     except Exception as error:
         return jsonify({"error": str(error)}), 502
 
@@ -283,7 +298,7 @@ def automatic_enrollment():
             model_label=payload["model_label"].strip(),
             sample_count=int(payload.get("sample_count", 36)),
             temperature=requested_temperature(payload),
-            api_format="auto",
+            api_format=requested_api_format(payload),
             data_file=config["data_file"],
             bank_file=config["bank_file"],
             bank_id=bank_id,

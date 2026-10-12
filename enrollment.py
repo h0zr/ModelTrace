@@ -8,6 +8,7 @@ import re
 import secrets
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -31,6 +32,11 @@ DEFAULT_UPSTREAM_USER_AGENT = (
 RETRYABLE_STATUS = {408, 429, 500, 502, 503, 504}
 MAX_ATTEMPTS = 3
 RETRY_BASE_DELAY = 1.0
+API_ENDPOINTS = {
+    "openai": "/chat/completions",
+    "responses": "/responses",
+    "anthropic": "/messages",
+}
 
 
 def upstream_user_agent() -> str:
@@ -155,18 +161,18 @@ def enroll_manual(
 
 
 def completion_url(base_url: str, api_format: str = "openai") -> str:
-    normalized = base_url.rstrip("/")
-    if api_format == "anthropic":
-        if normalized.endswith("/messages"):
-            return normalized
-        if normalized.endswith("/v1"):
-            return normalized + "/messages"
-        return normalized + "/v1/messages"
-    if normalized.endswith("/chat/completions"):
-        return normalized
-    if normalized.endswith("/v1"):
-        return normalized + "/chat/completions"
-    return normalized + "/v1/chat/completions"
+    if api_format not in API_ENDPOINTS:
+        raise ValueError(f"不支持的接口格式：{api_format}")
+    parsed = urllib.parse.urlsplit(base_url.strip())
+    path = parsed.path.rstrip("/")
+    for endpoint in API_ENDPOINTS.values():
+        if path.endswith(endpoint):
+            path = path[:-len(endpoint)]
+            break
+    else:
+        if not path.endswith("/v1"):
+            path += "/v1"
+    return urllib.parse.urlunsplit(parsed._replace(path=path + API_ENDPOINTS[api_format]))
 
 
 def _looks_like_waf_block(text: str) -> bool:
@@ -203,6 +209,40 @@ def _compact_upstream_error(details: str, fallback: str) -> str:
     return text[:500]
 
 
+def _responses_text(payload: dict) -> str:
+    status = payload.get("status")
+    if status not in (None, "completed"):
+        details = payload.get("incomplete_details")
+        reason = details.get("reason") if isinstance(details, dict) else None
+        description = f"{status}: {reason}" if reason else status
+        raise RuntimeError(f"Responses 回答未正常完成（{description}），本次回答不计入")
+    output = payload.get("output")
+    if not isinstance(output, list):
+        raise RuntimeError("上游响应不符合 Responses 格式：缺少 output 数组")
+    parts = []
+    for item in output:
+        if not isinstance(item, dict):
+            raise RuntimeError("上游响应不符合 Responses 格式：无效的 output 项")
+        if item.get("type") != "message":
+            continue
+        if item.get("status") not in (None, "completed"):
+            raise RuntimeError("Responses 消息未正常完成，本次回答不计入")
+        content = item.get("content")
+        if not isinstance(content, list):
+            raise RuntimeError("上游响应不符合 Responses 格式：无效的消息内容")
+        for block in content:
+            if not isinstance(block, dict):
+                raise RuntimeError("上游响应不符合 Responses 格式：无效的内容块")
+            if block.get("type") == "refusal":
+                raise RuntimeError("模型拒绝生成，本次回答不计入")
+            if block.get("type") == "output_text":
+                text = block.get("text")
+                if not isinstance(text, str):
+                    raise RuntimeError("上游响应不符合 Responses 格式：无效的文本")
+                parts.append(text)
+    return "".join(parts)
+
+
 def _request_completion(
     base_url: str,
     api_key: str,
@@ -212,6 +252,7 @@ def _request_completion(
     api_format: str,
     system_prompt: str = "",
 ) -> str:
+    url = completion_url(base_url, api_format)
     if api_format == "anthropic":
         body_data = {
             "model": api_model,
@@ -229,13 +270,23 @@ def _request_completion(
             "User-Agent": upstream_user_agent(),
         }
     else:
-        body_data = {
-            "model": api_model,
-            "messages": [
-                *([{"role": "system", "content": system_prompt}] if system_prompt else []),
-                {"role": "user", "content": prompt},
-            ],
-        }
+        if api_format == "responses":
+            body_data = {
+                "model": api_model,
+                "input": prompt,
+                "stream": False,
+                "store": False,
+            }
+            if system_prompt:
+                body_data["instructions"] = system_prompt
+        else:
+            body_data = {
+                "model": api_model,
+                "messages": [
+                    *([{"role": "system", "content": system_prompt}] if system_prompt else []),
+                    {"role": "user", "content": prompt},
+                ],
+            }
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -245,7 +296,6 @@ def _request_completion(
     if temperature is not None:
         body_data["temperature"] = temperature
     body = json.dumps(body_data).encode("utf-8")
-    url = completion_url(base_url, api_format)
     payload = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
         request = urllib.request.Request(url, data=body, headers=headers, method="POST")
@@ -268,25 +318,42 @@ def _request_completion(
                 continue
             retried = f"（已自动重试 {attempt - 1} 次）" if attempt > 1 else ""
             raise RuntimeError(f"无法连接接口：{reason}{retried}") from error
-    if api_format == "anthropic":
-        content = "".join(
-            block.get("text", "")
-            for block in payload["content"]
-            if block.get("type") == "text"
-        )
-        stop_reason = payload.get("stop_reason")
-        if stop_reason == "refusal":
-            raise RuntimeError("模型拒绝生成，本次回答不计入")
-        if stop_reason == "max_tokens":
-            raise RuntimeError("回答因 max_tokens 截断，本次回答不计入")
-    else:
-        choice = payload["choices"][0]
-        content = choice["message"]["content"]
-        if isinstance(content, list):
-            content = "".join(part.get("text", "") for part in content)
-        if choice.get("finish_reason") in {"length", "content_filter"}:
-            raise RuntimeError(f"回答未正常完成（{choice['finish_reason']}），本次回答不计入")
-    return str(content)
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            raise RuntimeError("上游接口未返回有效的 JSON 响应") from error
+    if not isinstance(payload, dict):
+        raise RuntimeError("上游接口未返回 JSON 对象")
+    if payload.get("error"):
+        message = _compact_upstream_error(json.dumps(payload, ensure_ascii=False), "上游接口返回错误")
+        raise RuntimeError(f"上游接口返回错误：{message}")
+    try:
+        if api_format == "responses":
+            content = _responses_text(payload)
+        elif api_format == "anthropic":
+            content = "".join(
+                block.get("text", "")
+                for block in payload["content"]
+                if block.get("type") == "text"
+            )
+            stop_reason = payload.get("stop_reason")
+            if stop_reason == "refusal":
+                raise RuntimeError("模型拒绝生成，本次回答不计入")
+            if stop_reason == "max_tokens":
+                raise RuntimeError("回答因 max_tokens 截断，本次回答不计入")
+        else:
+            choice = payload["choices"][0]
+            message = choice["message"]
+            if message.get("refusal"):
+                raise RuntimeError("模型拒绝生成，本次回答不计入")
+            content = message["content"]
+            if isinstance(content, list):
+                content = "".join(part.get("text", "") for part in content)
+            if choice.get("finish_reason") in {"length", "content_filter"}:
+                raise RuntimeError(f"回答未正常完成（{choice['finish_reason']}），本次回答不计入")
+    except (KeyError, IndexError, TypeError, AttributeError) as error:
+        raise RuntimeError(f"上游响应不符合 {api_format} 格式") from error
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError("上游接口未返回可用的文本内容")
+    return content
 
 
 def request_completion(
@@ -302,7 +369,13 @@ def request_completion(
         return _request_completion(
             base_url, api_key, api_model, prompt, temperature, api_format, system_prompt
         )
-    formats = ("openai", "anthropic")
+    formats = list(API_ENDPOINTS)
+    path = urllib.parse.urlsplit(base_url.strip()).path.rstrip("/")
+    for candidate, endpoint in API_ENDPOINTS.items():
+        if path.endswith(endpoint):
+            formats.remove(candidate)
+            formats.insert(0, candidate)
+            break
     errors = []
     for candidate in formats:
         try:
